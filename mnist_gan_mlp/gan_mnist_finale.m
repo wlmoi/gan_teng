@@ -13,16 +13,12 @@ disp("Mengimpor dan inisialisasi model...");
 G_net = importNetworkFromONNX('G.onnx');
 G_net = initialize(G_net, dlarray(randn(latent_size, 1, 'single'), 'CB'));
 
-% Impor Diskriminator (kita akan membutuhkannya untuk skor)
-D_net = importNetworkFromONNX('D.onnx');
-D_net = initialize(D_net, dlarray(randn(784, 1, 'single'), 'CB'));
-
 disp("Model siap.");
 
 %% 2. Buat Gambar PALSU (dari Generator)
 disp("Membuat gambar palsu...");
 
-% Buat vektor laten acak
+% Buat vektor laten acak BARU setiap kali dijalankan
 z = randn(latent_size, batch_size, 'single');
 dl_z = dlarray(z, 'CB');
 
@@ -32,12 +28,10 @@ dl_fake_images_vec = predict(G_net, dl_z); % Output [784 x 8]
 % --- Pasca-pemrosesan Gambar Palsu ---
 fake_images_vec = extractdata(dl_fake_images_vec);
 fake_images_denorm = (fake_images_vec + 1) / 2.0; % Denormalisasi
-
-% Bentuk ulang (Reshape) - Ini akan menghasilkan gambar "terdistorsi"
 fake_images_distorted = reshape(fake_images_denorm, 28, 28, 1, batch_size);
 
 % --- PERBAIKAN VISUAL (Row-Major vs Column-Major) ---
-% Kita transpose setiap halaman (gambar) 28x28 untuk memperbaikinya
+% Transpose setiap gambar agar tampilannya benar
 fake_images_display = pagetranspose(fake_images_distorted);
 
 
@@ -48,29 +42,12 @@ disp("Memuat gambar asli...");
 % Ambil 8 gambar asli pertama untuk perbandingan
 real_images_display = testImages(:,:,1,1:batch_size);
 
-% --- Pra-pemrosesan Gambar Asli (untuk Diskriminator) ---
-real_images_processed = (single(real_images_display) / 255.0 * 2.0) - 1.0;
-
-% --- PERBAIKAN DATA (Row-Major vs Column-Major) ---
-% Kita juga harus mentranspose gambar asli SEBELUM meratakannya
-real_images_transposed = pagetranspose(real_images_processed);
-real_images_flat = reshape(real_images_transposed, 784, batch_size);
-dl_real_images = dlarray(real_images_flat, 'CB');
-
-
-%% 4. Jalankan Diskriminator (Sesuai Notebook Asli)
-disp("Menjalankan Diskriminator pada gambar asli...");
-real_scores = predict(D_net, dl_real_images);
-
-disp("Skor untuk gambar asli (target: 1.0):");
-disp(extractdata(real_scores));
-
-
-%% 5. Tampilkan Hasil Berdampingan
+%% 4. Tampilkan Hasil Berdampingan
 disp("Menampilkan gambar...");
 
 figure;
-set(gcf, 'Position', [100, 100, 800, 400]); % Buat jendela gambar lebih besar
+% Atur ukuran jendela agar lebih lebar
+set(gcf, 'Position', [100, 100, 800, 400]);
 
 % Plot Gambar Asli
 subplot(1, 2, 1);
