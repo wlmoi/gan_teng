@@ -1,4 +1,4 @@
-% === SKRIP MATLAB LENGKAP DENGAN PERBAIKAN SINTAKS ===
+% === SKRIP MATLAB LENGKAP DENGAN PERBAIKAN PERMUTE DIMENSI ===
 
 % Asumsi parameter dari arsitektur DCGAN standar
 nz = 100;  % Ukuran vektor noise (input)
@@ -7,69 +7,47 @@ nc = 1;    % Jumlah channel output (1 utk grayscale)
 ndf = 64;  % Ukuran fitur diskriminator
 
 %% 1. Definisi Arsitektur Generator (G)
-% Arsitektur ini adalah asumsi. HARUS SAMA DENGAN dcgan.py
-% Ini adalah arsitektur umum untuk menghasilkan gambar 64x64
+% Arsitektur ini SUDAH SESUAI dengan gambar 'Generator.png'
 
 layersG = [
-    % Menggunakan imageInputLayer untuk input noise [1x1xnz]
     imageInputLayer([1 1 nz], 'Name', 'noise', 'Normalization', 'none')
-    
-    % Input: 1x1xnz -> Output: 4x4x(ngf*8)
     transposedConv2dLayer(4, ngf * 8, 'Stride', 1, 'Cropping', 0, 'Name', 'tconv1')
     batchNormalizationLayer('Name', 'bn1')
     reluLayer('Name', 'relu1')
-    
-    % Input: 4x4x(ngf*8) -> Output: 8x8x(ngf*4)
     transposedConv2dLayer(4, ngf * 4, 'Stride', 2, 'Cropping', 1, 'Name', 'tconv2')
     batchNormalizationLayer('Name', 'bn2')
     reluLayer('Name', 'relu2')
-    
-    % Input: 8x8x(ngf*4) -> Output: 16x16x(ngf*2)
     transposedConv2dLayer(4, ngf * 2, 'Stride', 2, 'Cropping', 1, 'Name', 'tconv3')
     batchNormalizationLayer('Name', 'bn3')
     reluLayer('Name', 'relu3')
-    
-    % Input: 16x16x(ngf*2) -> Output: 32x32xngf
     transposedConv2dLayer(4, ngf, 'Stride', 2, 'Cropping', 1, 'Name', 'tconv4')
     batchNormalizationLayer('Name', 'bn4')
     reluLayer('Name', 'relu4')
-    
-    % Input: 32x32xngf -> Output: 64x64xnc
     transposedConv2dLayer(4, nc, 'Stride', 2, 'Cropping', 1, 'Name', 'tconv5')
-    tanhLayer('Name', 'tanh_out') % PyTorch DCGAN biasanya pakai Tanh
+    tanhLayer('Name', 'tanh_out')
 ];
 
 lgraphG = layerGraph(layersG);
 netG = dlnetwork(lgraphG);
 
 %% 2. Definisi Arsitektur Diskriminator (D)
-% Asumsi input gambar 64x64
+% Arsitektur ini SUDAH SESUAI dengan gambar 'Discriminator.png'
 
 layersD = [
     imageInputLayer([64 64 nc], 'Name', 'image', 'Normalization', 'none')
-
-    % Input: 64x64xnc -> Output: 32x32xndf
     convolution2dLayer(4, ndf, 'Stride', 2, 'Padding', 1, 'Name', 'conv1')
-    leakyReluLayer(0.2, 'Name', 'lrelu1') % DCGAN pakai LeakyReLU
-
-    % Input: 32x32xndf -> Output: 16x16x(ndf*2)
+    leakyReluLayer(0.2, 'Name', 'lrelu1')
     convolution2dLayer(4, ndf * 2, 'Stride', 2, 'Padding', 1, 'Name', 'conv2')
     batchNormalizationLayer('Name', 'bn2')
     leakyReluLayer(0.2, 'Name', 'lrelu2')
-
-    % Input: 16x16x(ndf*2) -> Output: 8x8x(ndf*4)
     convolution2dLayer(4, ndf * 4, 'Stride', 2, 'Padding', 1, 'Name', 'conv3')
     batchNormalizationLayer('Name', 'bn3')
     leakyReluLayer(0.2, 'Name', 'lrelu3')
-
-    % Input: 8x8x(ndf*4) -> Output: 4x4x(ndf*8)
     convolution2dLayer(4, ndf * 8, 'Stride', 2, 'Padding', 1, 'Name', 'conv4')
     batchNormalizationLayer('Name', 'bn4')
     leakyReluLayer(0.2, 'Name', 'lrelu4')
-
-    % Input: 4x4x(ndf*8) -> Output: 1x1x1
     convolution2dLayer(4, 1, 'Stride', 1, 'Padding', 0, 'Name', 'conv5')
-    sigmoidLayer('Name', 'sigmoid_out') % Output probabilitas
+    sigmoidLayer('Name', 'sigmoid_out')
 ];
 
 lgraphD = layerGraph(layersD);
@@ -78,61 +56,98 @@ netD = dlnetwork(lgraphD);
 disp("Arsitektur model Generator dan Diskriminator berhasil dibuat di MATLAB.");
 
 %% 3. Memuat Bobot dari File .mat
-% PERINGATAN: Bagian ini masih bersifat ASUMSI dan kemungkinan
-% besar akan menimbulkan error. Nama variabel (cth: 'main_0_weight')
-% HARUS SAMA PERSIS dengan nama yang diekspor dari Python.
+% =======================================================================
+% === PERBAIKAN UTAMA: Menggunakan permute() untuk bobot konvolusi ===
+% Urutan PyTorch [out, in, kH, kW] atau [in, out, kH, kW]
+% Urutan MATLAB [kH, kW, in, out] atau [kH, kW, out, in]
+% Permutasi yang diperlukan: [3, 4, 2, 1]
+% =======================================================================
 
+% --- GENERATOR (G) ---
 try
     disp("Memuat bobot Generator dari netG_weights.mat...");
     weightsG = load('netG_weights.mat');
     
-    % PERHATIAN: Mapping ini HARUS sesuai dengan urutan layer di 'dcgan.py'
-    % PyTorch biasanya menamai layer 'main.0.weight', 'main.1.weight', dst.
-    % Skrip Python saya mengganti '.' menjadi '_'
-    
-    % Contoh mapping (ASUMSI NAMA DARI PYTORCH):
-    % Asumsi 'main.0' adalah tconv1
-    netG.Layers(2).Weights = weightsG.main_0_weight;
-    netG.Layers(2).Bias = weightsG.main_0_bias;
-    % Asumsi 'main.1' adalah bn1
-    netG.Layers(3).Scale = weightsG.main_1_weight; % BN di PyTorch punya 'weight' (scale) dan 'bias'
+    % Blok 1 (main.0 = tconv1, main.1 = bn1)
+    netG.Layers(2).Weights = permute(weightsG.main_0_weight, [3, 4, 2, 1]); % TransposeConv [kH, kW, out, in]
+    netG.Layers(3).Scale = weightsG.main_1_weight;
     netG.Layers(3).Offset = weightsG.main_1_bias;
     netG.Layers(3).TrainedMean = weightsG.main_1_running_mean;
     netG.Layers(3).TrainedVariance = weightsG.main_1_running_var;
     
-    % Asumsi 'main.3' adalah tconv2
-    netG.Layers(5).Weights = weightsG.main_3_weight;
-    netG.Layers(5).Bias = weightsG.main_3_bias;
-    % Asumsi 'main.4' adalah bn2
+    % Blok 2 (main.3 = tconv2, main.4 = bn2)
+    netG.Layers(5).Weights = permute(weightsG.main_3_weight, [3, 4, 2, 1]);
     netG.Layers(6).Scale = weightsG.main_4_weight;
     netG.Layers(6).Offset = weightsG.main_4_bias;
     netG.Layers(6).TrainedMean = weightsG.main_4_running_mean;
-    netG.Layers(6).TredVariance = weightsG.main_4_running_var;
-    
-    % ... Anda harus melanjutkan mapping ini untuk SEMUA layer ...
-    % (tconv3, bn3, tconv4, bn4)
-    
-    % ========================================================
-    % --- PERBAIKAN SINTAKS ADA DI BARIS BERIKUTNYA ---
-    % ========================================================
-    
-    % Mapping layer terakhir (tconv5, asumsi 'main.9')
-    % Indeks layer (14) mungkin perlu disesuaikan
-    netG.Layers(14).Weights = weightsG.main_9_weight;
-    netG.Layers(14).Bias = weightsG.main_9_bias; % <-- Ini baris yang diperbaiki (sebelumnya '1Asums4')
+    netG.Layers(6).TrainedVariance = weightsG.main_4_running_var;
 
-    disp("Bobot Generator berhasil dimuat (secara parsial).");
+    % Blok 3 (main.6 = tconv3, main.7 = bn3)
+    netG.Layers(8).Weights = permute(weightsG.main_6_weight, [3, 4, 2, 1]);
+    netG.Layers(9).Scale = weightsG.main_7_weight;
+    netG.Layers(9).Offset = weightsG.main_7_bias;
+    netG.Layers(9).TrainedMean = weightsG.main_7_running_mean;
+    netG.Layers(9).TrainedVariance = weightsG.main_7_running_var;
+
+    % Blok 4 (main.9 = tconv4, main.10 = bn4)
+    netG.Layers(11).Weights = permute(weightsG.main_9_weight, [3, 4, 2, 1]);
+    netG.Layers(12).Scale = weightsG.main_10_weight;
+    netG.Layers(12).Offset = weightsG.main_10_bias;
+    netG.Layers(12).TrainedMean = weightsG.main_10_running_mean;
+    netG.Layers(12).TrainedVariance = weightsG.main_10_running_var;
+    
+    % Blok 5 (main.12 = tconv5)
+    netG.Layers(14).Weights = permute(weightsG.main_12_weight, [3, 4, 2, 1]);
+
+    disp("Bobot Generator berhasil dimuat.");
     
 catch e
     disp("ERROR saat memuat bobot Generator:");
     disp("Pastikan 'netG_weights.mat' ada di folder yang sama.");
-    disp("Pastikan juga nama struct (cth: 'main_0_weight') sudah benar.");
-    disp("Jika arsitektur Anda berbeda, Anda perlu menyesuaikan mapping bobot manual.");
+    disp("Pastikan Anda sudah menjalankan skrip 'export_weights.py' dari PyTorch.");
     disp(e.message);
 end
 
-% Ulangi proses yang sama untuk Diskriminator (netD)
-% ... (load('netD_weights.mat'), lalu petakan bobotnya) ...
+% --- DISCRIMINATOR (D) ---
+try
+    disp("Memuat bobot Diskriminator dari netD_weights.mat...");
+    weightsD = load('netD_weights.mat');
+    
+    % Blok 1 (main.0 = conv1)
+    netD.Layers(2).Weights = permute(weightsD.main_0_weight, [3, 4, 2, 1]); % Conv [kH, kW, in, out]
+    
+    % Blok 2 (main.2 = conv2, main.3 = bn2)
+    netD.Layers(4).Weights = permute(weightsD.main_2_weight, [3, 4, 2, 1]);
+    netD.Layers(5).Scale = weightsD.main_3_weight;
+    netD.Layers(5).Offset = weightsD.main_3_bias;
+    netD.Layers(5).TrainedMean = weightsD.main_3_running_mean;
+    netD.Layers(5).TrainedVariance = weightsD.main_3_running_var;
+
+    % Blok 3 (main.5 = conv3, main.6 = bn3)
+    netD.Layers(7).Weights = permute(weightsD.main_5_weight, [3, 4, 2, 1]);
+    netD.Layers(8).Scale = weightsD.main_6_weight;
+    netD.Layers(8).Offset = weightsD.main_6_bias;
+    netD.Layers(8).TrainedMean = weightsD.main_6_running_mean;
+    netD.Layers(8).TrainedVariance = weightsD.main_6_running_var;
+    
+    % Blok 4 (main.8 = conv4, main.9 = bn4)
+    netD.Layers(10).Weights = permute(weightsD.main_8_weight, [3, 4, 2, 1]);
+    netD.Layers(11).Scale = weightsD.main_9_weight;
+    netD.Layers(11).Offset = weightsD.main_9_bias;
+    netD.Layers(11).TrainedMean = weightsD.main_9_running_mean;
+    netD.Layers(11).TrainedVariance = weightsD.main_9_running_var;
+    
+    % Blok 5 (main.11 = conv5)
+    netD.Layers(13).Weights = permute(weightsD.main_11_weight, [3, 4, 2, 1]);
+
+    disp("Bobot Diskriminator berhasil dimuat.");
+    
+catch e
+    disp("ERROR saat memuat bobot Diskriminator:");
+    disp("Pastikan 'netD_weights.mat' ada di folder yang sama.");
+    disp("Pastikan Anda sudah menjalankan skrip 'export_weights.py' dari PyTorch.");
+    disp(e.message);
+end
 
 
 %% 4. Menghasilkan Gambar (Sesuai Cell 6 di Notebook Anda)
@@ -141,7 +156,7 @@ disp("Menghasilkan gambar dari Generator...");
 
 % Buat noise acak
 numImages = 16;
-% Menyesuaikan dimensi noise agar [H, W, C, B] -> [1, 1, 100, 16]
+% Dimensi [H, W, C, B] -> [1, 1, 100, 16]
 noise = randn(1, 1, nz, numImages, 'single');
 
 % Konversi ke dlarray
@@ -166,8 +181,14 @@ montage(generatedImages);
 title("Gambar yang Dihasilkan oleh Generator (MATLAB)");
 
 %% 5. Menjalankan Diskriminator (Sesuai Cell 8 di Notebook Anda)
-% Kode ini hanya akan berfungsi jika Anda sudah memuat bobot netD
+% Kode ini sekarang seharusnya berfungsi jika bobot netD berhasil dimuat
 
-% scores = predict(netD, generatedImages_dl);
-% disp("Skor dari Diskriminator:");
-% disp(gather(extractdata(scores)));
+if canUseGPU
+    netD = dlupdate(netD, @gpuArray);
+end
+
+scores = predict(netD, generatedImages_dl);
+disp("Skor dari Diskriminator:");
+% Merapikan output agar mirip dengan Python (opsional)
+scores_vector = squeeze(gather(extractdata(scores)));
+disp(scores_vector');
